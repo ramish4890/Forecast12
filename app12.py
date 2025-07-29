@@ -187,13 +187,15 @@ def run_monthly_forecast(uploaded_file):
         df_lstm_input = df_lstm_input.asfreq('MS')
 
         # === Data Length Check for Monthly Forecast (Applies only to df_lstm_input) ===
-        # We need 24 months for the 2-year lag feature
-        # Plus input_seq_len (8) and forecast_horizon (8) for sequences
-        # Plus a small buffer (e.g., 5) to ensure enough samples for train/test split
-        min_required_months_for_lstm_training = 24 + 8 + 8 + 5
+        # Minimum data needed to have valid 24-month lags AND at least one sequence for LSTM training.
+        # This means at least 24 months for lags + input_seq_len + forecast_horizon months.
+        # 24 (lags) + 8 (input_seq_len) + 8 (forecast_horizon) = 40 months
+        # We need at least 40 months in the 'monthly forecast' sheet.
+        min_required_months_for_lstm_training = 40
         if len(df_lstm_input) < min_required_months_for_lstm_training:
-            st.error(f"The 'Monthly Forecast' requires at least **{min_required_months_for_lstm_training} months** (approx. {min_required_months_for_lstm_training/12:.1f} years) "
-                     f"of data in the **'monthly forecast'** sheet to effectively train the LSTM model with seasonal lags. "
+            st.error(f"The 'Monthly Forecast' requires at least **{min_required_months_for_lstm_training} months** "
+                     f"({min_required_months_for_lstm_training // 12} years and {min_required_months_for_lstm_training % 12} months) "
+                     f"of data in the **'monthly forecast'** sheet to effectively train the LSTM model with 2-year seasonal lags. "
                      f"You currently have {len(df_lstm_input)} months of data in this sheet. "
                      f"Please upload a file with more historical monthly influx data.")
             return None, None, None, None, None
@@ -241,9 +243,10 @@ def run_monthly_forecast(uploaded_file):
         forecast_horizon = 8
         X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
 
-        # Ensure enough data for split after sequence creation
+        # This check is still valid: ensure enough sequences were formed after dropping NAs.
+        # It's a secondary check after the primary one on df_lstm_input length.
         if len(X_seq) < 2: # Need at least 2 sequences for train/test split
-            st.warning("Not enough sequences could be created for LSTM training after preparing data and handling lags. Please provide more historical data.")
+            st.warning("Insufficient valid data points to create enough sequences for LSTM training after preparing data and handling lags. This might happen with very short datasets even if the initial length passes the minimum.")
             return None, None, None, None, None
 
         split_idx = int(len(X_seq) * 0.8)
