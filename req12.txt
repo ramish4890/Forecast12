@@ -1,8 +1,0 @@
-streamlit
-pandas
-numpy
-openpyxl
-xlsxwriter
-tensorflow-cpu==2.11.0
-matplotlib
-scikit-learn # for MinMaxScaler
