@@ -5,3 +5,4 @@ openpyxl
 tensorflow-cpu
 scikit-learn
 matplotlib
+xlsxwriter
