@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -170,7 +169,7 @@ def run_revised_forecast(uploaded_file):
         st.exception(e)
         return None, None, None, None, None
 
-# --- Function for Monthly Forecast (New LSTM-based code with seasonal lags) ---
+# --- Function for Monthly Forecast (New LSTM-based code with adjusted seasonal lags) ---
 def run_monthly_forecast(uploaded_file):
     st.header("Monthly Forecast (LSTM-based with Seasonality)")
     st.info("Starting Monthly Forecast generation...")
@@ -187,21 +186,20 @@ def run_monthly_forecast(uploaded_file):
         df_lstm_input = df_lstm_input.asfreq('MS')
 
         # === Data Length Check for Monthly Forecast (Applies only to df_lstm_input) ===
-        # Minimum data needed to have valid 24-month lags AND at least one sequence for LSTM training.
-        # This means at least 24 months for lags + input_seq_len + forecast_horizon months.
-        # 24 (lags) + 8 (input_seq_len) + 8 (forecast_horizon) = 40 months
-        # We need at least 40 months in the 'monthly forecast' sheet.
-        min_required_months_for_lstm_training = 40
+        # Adjusted minimum:
+        # We will now only use a 1-year seasonal lag to accommodate smaller datasets.
+        # Minimum months needed = 12 (for 1-year lag) + input_seq_len (8) + forecast_horizon (8) = 28 months.
+        min_required_months_for_lstm_training = 28 # Minimum required for 1-year lag + sequence
         if len(df_lstm_input) < min_required_months_for_lstm_training:
             st.error(f"The 'Monthly Forecast' requires at least **{min_required_months_for_lstm_training} months** "
                      f"({min_required_months_for_lstm_training // 12} years and {min_required_months_for_lstm_training % 12} months) "
-                     f"of data in the **'monthly forecast'** sheet to effectively train the LSTM model with 2-year seasonal lags. "
+                     f"of data in the **'monthly forecast'** sheet to effectively train the LSTM model with 1-year seasonal lags. "
                      f"You currently have {len(df_lstm_input)} months of data in this sheet. "
                      f"Please upload a file with more historical monthly influx data.")
             return None, None, None, None, None
 
 
-        # === STEP 2: Feature Engineering (Updated with Seasonal Lags) ===
+        # === STEP 2: Feature Engineering (Adjusted: Only 1-year Seasonal Lag) ===
         df_lstm_input['Influx_lag1'] = df_lstm_input['Influx'].shift(1)
         df_lstm_input['Influx_lag2'] = df_lstm_input['Influx'].shift(2)
         df_lstm_input['Rolling_Mean_3'] = df_lstm_input['Influx'].rolling(window=3).mean()
@@ -214,16 +212,17 @@ def run_monthly_forecast(uploaded_file):
         df_lstm_input['Time_Index'] = np.arange(len(df_lstm_input))
         df_lstm_input['Influx_CumAvg'] = df_lstm_input['Influx'].expanding().mean()
 
-        # Add Seasonal Lag Features
+        # Adjusted: Only Add 1-Year Seasonal Lag Feature
         df_lstm_input['Influx_12_month_lag'] = df_lstm_input['Influx'].shift(12) # Influx from same month last year
-        df_lstm_input['Influx_24_month_lag'] = df_lstm_input['Influx'].shift(24) # Influx from same month two years ago
+        # Removed: df_lstm_input['Influx_24_month_lag'] = df_lstm_input['Influx'].shift(24)
 
         df_lstm_input.dropna(inplace=True) # Drop NaNs created by lags and rolling means
 
+        # Updated features list
         features = ['Influx_lag1', 'Influx_lag2', 'Rolling_Mean_3', 'AHT',
                     'Sin_Month', 'Cos_Month', 'Sin_Quarter', 'Cos_Quarter',
                     'Time_Index', 'Influx_CumAvg',
-                    'Influx_12_month_lag', 'Influx_24_month_lag']
+                    'Influx_12_month_lag'] # Removed 'Influx_24_month_lag'
         target = 'Influx'
 
         # === STEP 3: Scaling and Sequence Creation ===
@@ -244,7 +243,6 @@ def run_monthly_forecast(uploaded_file):
         X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
 
         # This check is still valid: ensure enough sequences were formed after dropping NAs.
-        # It's a secondary check after the primary one on df_lstm_input length.
         if len(X_seq) < 2: # Need at least 2 sequences for train/test split
             st.warning("Insufficient valid data points to create enough sequences for LSTM training after preparing data and handling lags. This might happen with very short datasets even if the initial length passes the minimum.")
             return None, None, None, None, None
@@ -303,8 +301,7 @@ def run_monthly_forecast(uploaded_file):
         st.info("Monthly influx forecast generated.")
 
         # === STEP 7: Daily Pod Forecast ===
-        # Use the 'daily' sheet from the same uploaded file
-        daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily")
+        daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily") # Use the 'daily' sheet
         daily_df_monthly_input['Date'] = pd.to_datetime(daily_df_monthly_input['Date'])
         daily_df_monthly_input['Weekday'] = daily_df_monthly_input['Date'].dt.weekday
         min_days = daily_df_monthly_input['Weekday'].value_counts().min()
