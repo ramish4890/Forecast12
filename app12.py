@@ -472,4 +472,4 @@ else:
 st.sidebar.markdown("---")
 st.sidebar.markdown("Developed by Your Name/Company")
 
-```
+
