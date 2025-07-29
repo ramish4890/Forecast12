@@ -2,7 +2,5 @@ streamlit
 pandas
 numpy
 openpyxl
-xlsxwriter
 tensorflow-cpu==2.9.1
-matplotlib
-scikit-learn # for MinMaxScaler
+scikit-learn
