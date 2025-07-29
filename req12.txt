@@ -3,6 +3,6 @@ pandas
 numpy
 openpyxl
 xlsxwriter
-tensorflow
+tensorflow-cpu
 matplotlib
 scikit-learn # for MinMaxScaler
