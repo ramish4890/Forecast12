@@ -1,21 +1,3 @@
-Okay, I can definitely enhance your LSTM model in the "Monthly Forecast" function to better capture **monthly trends and seasonality**. The idea of comparing the respective month with the last two years' months is a great way to do this.
-
-This involves adding **seasonal lag features** to your input data. For example, to forecast December 2025, the model will be given information about the actual influx in December 2024 and December 2023. This helps the model learn recurring seasonal patterns.
-
-Here's how I'll update the `run_monthly_forecast` function:
-
-1.  **Add `Influx_12_month_lag`:** This will be the influx from the same month in the previous year.
-2.  **Add `Influx_24_month_lag`:** This will be the influx from the same month two years prior.
-3.  **Update the `features` list:** These new lags will be included in the input features for the LSTM model.
-
-**Important Consideration:**
-Adding these lags means your dataset will require at least **24 months of initial historical data** to have non-NaN values for these new features. The `df_lstm_input.dropna(inplace=True)` step will remove the first 24 rows, reducing the total amount of data available for training. Make sure you have enough historical data to accommodate this.
-
------
-
-Here's the updated Streamlit code with the enhanced LSTM model:
-
-```python
 import streamlit as st
 import pandas as pd
 import numpy as np
