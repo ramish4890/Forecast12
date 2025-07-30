@@ -217,8 +217,8 @@ def run_monthly_forecast(uploaded_file):
                 y_seqs.append(y[i+input_len:i+input_len+forecast_len].flatten())
             return np.array(X_seqs), np.array(y_seqs)
 
-        input_seq_len = 8
-        forecast_horizon = 8
+        input_seq_len = 6
+        forecast_horizon = 6
         X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
 
         split_idx = int(len(X_seq) * 0.8)
@@ -264,6 +264,77 @@ def run_monthly_forecast(uploaded_file):
         pred = scaler_y.inverse_transform(pred_scaled).flatten()
         future_dates = pd.date_range(start=df_lstm_input.index[-1] + pd.DateOffset(months=1), periods=forecast_horizon, freq='MS')
         forecast_df_monthly = pd.DataFrame({'Forecasted Influx': pred}, index=future_dates)
+        # === STEP 6: Forecast monthly ===
+        last_input_seq = X_all[-input_seq_len:].reshape((1, input_seq_len, len(features)))
+        pred_scaled = model.predict(last_input_seq)
+        pred = scaler_y.inverse_transform(pred_scaled).flatten()
+        future_dates = pd.date_range(start=df_lstm_input.index[-1] + pd.DateOffset(months=1), periods=forecast_horizon, freq='MS')
+        
+        # Create initial forecast DataFrame
+        forecast_df_monthly = pd.DataFrame({'Forecasted Influx': pred}, index=future_dates)
+        
+        # === STEP 7: Adjust forecast using historical trends (keep same column name) ===
+        adjusted_forecast = []
+        
+        for forecast_month in forecast_df_monthly.index:
+            month = forecast_month.month
+        
+            # Collect same-month influx for last 2–3 years
+            historical_years = [1, 2, 3]
+            past_values = []
+            
+            for i in historical_years:
+                past_date = forecast_month - pd.DateOffset(years=i)
+                if past_date in df_lstm_input.index:
+                    past_values.append(df_lstm_input.loc[past_date, 'Influx'])
+        
+            # Compute average % change over the years
+            if len(past_values) >= 2:
+                diffs = [((curr - prev) / prev) for prev, curr in zip(past_values[:-1], past_values[1:]) if prev != 0]
+                avg_change = np.mean(diffs) if diffs else 0
+                adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx'] * (1 + avg_change)
+            else:
+                adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']  # No adjustment
+        
+            adjusted_forecast.append(adjusted)
+        
+        # Overwrite the original forecast column with adjusted values (same name)
+        forecast_df_monthly['Forecasted Influx'] = adjusted_forecast
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
         st.info("Monthly influx forecast generated.")
 
         # === STEP 7: Daily Pod Forecast ===
