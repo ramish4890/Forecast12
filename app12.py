@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -30,7 +29,7 @@ def set_seeds():
 set_seeds()
 
 
-# --- Function for Revised Forecast (Your original code - No Changes) ---
+# --- Function for Revised Forecast (Your original code) ---
 def run_revised_forecast(uploaded_file):
     st.header("Revised Forecast (Hourly Proportions based)")
     st.info("Starting Revised Forecast generation...")
@@ -170,9 +169,9 @@ def run_revised_forecast(uploaded_file):
         st.exception(e)
         return None, None, None, None, None
 
-# --- Function for Monthly Forecast (New LSTM-based code with seasonal lags) ---
+# --- Function for Monthly Forecast (New LSTM-based code) ---
 def run_monthly_forecast(uploaded_file):
-    st.header("Monthly Forecast (LSTM-based with Seasonality)")
+    st.header("Monthly Forecast (LSTM-based)")
     st.info("Starting Monthly Forecast generation...")
 
     try:
@@ -186,7 +185,7 @@ def run_monthly_forecast(uploaded_file):
         df_lstm_input.set_index('Month', inplace=True)
         df_lstm_input = df_lstm_input.asfreq('MS')
 
-        # === STEP 2: Feature Engineering (Updated with Seasonal Lags) ===
+        # === STEP 2: Feature Engineering ===
         df_lstm_input['Influx_lag1'] = df_lstm_input['Influx'].shift(1)
         df_lstm_input['Influx_lag2'] = df_lstm_input['Influx'].shift(2)
         df_lstm_input['Rolling_Mean_3'] = df_lstm_input['Influx'].rolling(window=3).mean()
@@ -198,17 +197,11 @@ def run_monthly_forecast(uploaded_file):
         df_lstm_input['Cos_Quarter'] = np.cos(2 * np.pi * df_lstm_input['Quarter'] / 4)
         df_lstm_input['Time_Index'] = np.arange(len(df_lstm_input))
         df_lstm_input['Influx_CumAvg'] = df_lstm_input['Influx'].expanding().mean()
-
-        # NEW: Add Seasonal Lag Features
-        df_lstm_input['Influx_12_month_lag'] = df_lstm_input['Influx'].shift(12) # Influx from same month last year
-        df_lstm_input['Influx_24_month_lag'] = df_lstm_input['Influx'].shift(24) # Influx from same month two years ago
-
-        df_lstm_input.dropna(inplace=True) # Drop NaNs created by lags and rolling means
+        df_lstm_input.dropna(inplace=True)
 
         features = ['Influx_lag1', 'Influx_lag2', 'Rolling_Mean_3', 'AHT',
                     'Sin_Month', 'Cos_Month', 'Sin_Quarter', 'Cos_Quarter',
-                    'Time_Index', 'Influx_CumAvg',
-                    'Influx_12_month_lag', 'Influx_24_month_lag'] # NEW: Updated features list
+                    'Time_Index', 'Influx_CumAvg']
         target = 'Influx'
 
         # === STEP 3: Scaling and Sequence Creation ===
@@ -228,20 +221,7 @@ def run_monthly_forecast(uploaded_file):
         forecast_horizon = 8
         X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
 
-        # Ensure enough data for split
-        if len(X_seq) < 2: # Need at least 2 sequences for train/test split
-            st.warning("Not enough historical data after adding seasonal lags to train the LSTM model effectively. Please provide at least 2 years and 3 months of monthly data.")
-            return None, None, None, None, None
-
         split_idx = int(len(X_seq) * 0.8)
-        # Ensure split_idx leaves at least one sample for test
-        if split_idx == len(X_seq):
-            split_idx = len(X_seq) - 1
-            if split_idx < 1: # If even after adjusting, there's less than 1 sample for training
-                st.warning("Insufficient data for training after creating sequences and splitting. Need more historical data.")
-                return None, None, None, None, None
-
-
         X_train, X_test = X_seq[:split_idx], X_seq[split_idx:]
         y_train, y_test = y_seq[:split_idx], y_seq[split_idx:]
 
@@ -279,7 +259,6 @@ def run_monthly_forecast(uploaded_file):
         st.pyplot(fig)
 
         # === STEP 6: Forecast monthly ===
-        # The 'last_input_seq' already contains the latest available seasonal lags
         last_input_seq = X_all[-input_seq_len:].reshape((1, input_seq_len, len(features)))
         pred_scaled = model.predict(last_input_seq)
         pred = scaler_y.inverse_transform(pred_scaled).flatten()
@@ -288,7 +267,8 @@ def run_monthly_forecast(uploaded_file):
         st.info("Monthly influx forecast generated.")
 
         # === STEP 7: Daily Pod Forecast ===
-        daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily") # Use the 'daily' sheet
+        # Use the 'daily' sheet from the same uploaded file
+        daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily")
         daily_df_monthly_input['Date'] = pd.to_datetime(daily_df_monthly_input['Date'])
         daily_df_monthly_input['Weekday'] = daily_df_monthly_input['Date'].dt.weekday
         min_days = daily_df_monthly_input['Weekday'].value_counts().min()
@@ -318,7 +298,6 @@ def run_monthly_forecast(uploaded_file):
                 sum_of_relevant_weekday_props = sum(pod_week_props.get(idx, 0) for idx in weekdays_in_month)
                 weekday_counts_in_month = pd.Series(weekdays_in_month).value_counts()
 
-
                 for day in days:
                     weekday_idx = day.weekday()
                     weekday_prop_val = pod_week_props.get(weekday_idx, 0)
@@ -338,7 +317,8 @@ def run_monthly_forecast(uploaded_file):
         st.info("Daily pod forecast generated.")
 
         # === STEP 8: Hourly Forecast ===
-        hourly_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="hourly") # Use the 'hourly' sheet
+        # Use the 'hourly' sheet from the same uploaded file
+        hourly_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="hourly")
         hourly_df_monthly_input['Date'] = pd.to_datetime(hourly_df_monthly_input['Date'])
         hourly_df_monthly_input['Weekday'] = hourly_df_monthly_input['Date'].dt.day_name()
         grouped = hourly_df_monthly_input.groupby(['Pod', 'Weekday', 'Hour'])['Influx'].sum().reset_index()
@@ -382,7 +362,7 @@ def run_monthly_forecast(uploaded_file):
         return forecast_df_monthly, monthly_pod_forecast, daily_forecast_df, hourly_forecast_df, None # No pivot for monthly forecast
 
     except Exception as e:
-        st.error(f"Error in Monthly Forecast: Please ensure the uploaded file contains 'monthly forecast', 'daily', and 'hourly' sheets with correct data structure, and sufficient historical data for seasonal lags. Error: {e}")
+        st.error(f"Error in Monthly Forecast: Please ensure the uploaded file contains 'monthly forecast', 'daily', and 'hourly' sheets with correct data structure. Error: {e}")
         st.exception(e)
         return None, None, None, None, None
 
@@ -392,9 +372,9 @@ def run_monthly_forecast(uploaded_file):
 # File Uploader for the input data
 st.sidebar.header("Upload Data")
 st.sidebar.markdown("**Please upload a single Excel file containing ALL the necessary sheets:**")
-st.sidebar.markdown("- For **Revised Forecast**: sheets `hourly`, `mmf`")
-st.sidebar.markdown("- For **Monthly Forecast**: sheets `monthly forecast`, `daily`, `hourly`")
-st.sidebar.markdown("*(Note: The `hourly` sheet will be used by both forecasting methods.)*")
+st.sidebar.markdown("- For **Revised Forecast**: sheets hourly, mmf")
+st.sidebar.markdown("- For **Monthly Forecast**: sheets monthly forecast, daily, hourly")
+st.sidebar.markdown("*(Note: The hourly sheet will be used by both forecasting methods.)*")
 
 uploaded_file = st.sidebar.file_uploader("Choose your Excel file", type="xlsx", key="main_upload")
 
@@ -472,4 +452,3 @@ else:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("Developed by Your Name/Company")
-
