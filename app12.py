@@ -317,18 +317,17 @@ def run_monthly_forecast(uploaded_file):
                         last_year_influx = df_lstm_input.loc[ref_date, 'Influx']
                         actual_change = (current_forecast - last_year_influx) / last_year_influx if last_year_influx != 0 else 0
         
-                        if abs(actual_change) > 0.08:
-                            if month == 11:
-                                oct_date = pd.Timestamp(year=forecast_month.year, month=10, day=1)
-                                if oct_date in forecast_df_monthly.index:
-                                    base = forecast_df_monthly.loc[oct_date, 'Forecasted Influx']
-                                    adjusted = base * (1 + avg_change)
-                            elif month == 12:
-                                if len(adjusted_forecast) >= 2:
-                                    nov_adjusted = adjusted_forecast[-1]
-                                    adjusted = nov_adjusted * (1 + avg_change)
-                            else:
-                                adjusted = current_forecast * (1 + avg_change)
+                        if month == 11:
+                            oct_date = pd.Timestamp(year=forecast_month.year, month=10, day=1)
+                            if oct_date in forecast_df_monthly.index:
+                                base = forecast_df_monthly.loc[oct_date, 'Forecasted Influx']
+                                adjusted = base * (1 + avg_change)
+                        elif month == 12:
+                            if len(adjusted_forecast) >= 2:
+                                nov_adjusted = adjusted_forecast[-1]
+                                adjusted = nov_adjusted * (1 + avg_change)
+                        else:
+                            adjusted = current_forecast * (1 + avg_change)
         
             adjusted_forecast.append(adjusted)
             avg_changes.append(avg_change)
