@@ -230,9 +230,9 @@ def run_monthly_forecast(uploaded_file):
         def build_and_compile_model(input_shape, output_dim):
             model = Sequential([
                 LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape),
-                Dropout(0.2),
+                Dropout(0.4),
                 LSTM(32, activation='relu'),
-                Dropout(0.2),
+                Dropout(0.4),
                 Dense(output_dim)
             ])
             model.compile(optimizer='adam', loss='mse')
