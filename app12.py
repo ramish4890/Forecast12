@@ -288,52 +288,55 @@ def run_monthly_forecast(uploaded_file):
                 
         adjusted_forecast = []
         avg_changes = []
-        
-        latest_year = df_lstm_input.index.max().year
-        
-        # To store adjusted values by month for cascading use
         adjusted_values = {}
         
-        for forecast_month in forecast_df_monthly.index:
+        # Sort forecast to ensure order
+        forecast_df_monthly = forecast_df_monthly.sort_index()
+        
+        # Loop through forecast months
+        for i, forecast_month in enumerate(forecast_df_monthly.index):
             month = forecast_month.month
+            year = forecast_month.year
             current_forecast = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
         
-            adjusted = current_forecast
-            avg_change = 0
-        
-            if month in [10, 11, 12]:  # Oct, Nov, Dec
+            if i == 0:
+                # No previous month to compare — use original forecast
+                adjusted = current_forecast
+                avg_change = 0
+            else:
+                # Get previous month
+                prev_month_dt = forecast_df_monthly.index[i - 1]
+                prev_month = prev_month_dt.month
+                prev_adjusted = adjusted_values[prev_month_dt]
+                
+                # Collect historical MoM % changes
                 past_changes = []
+                for j in [1, 2, 3]:  # Last 3 years
+                    hist_year = year - j
+                    hist_curr_month = pd.Timestamp(year=hist_year, month=month, day=1)
+                    hist_prev_month = pd.Timestamp(year=hist_year, month=prev_month, day=1)
         
-                for i in [1, 2, 3]:  # last 3 years
-                    year = forecast_month.year - i
-                    prev_month = month - 1
-                    if prev_month == 0:
-                        continue  # Skip if January (no Dec in previous year)
-        
-                    this_month = pd.Timestamp(year=year, month=month, day=1)
-                    prev_month_dt = pd.Timestamp(year=year, month=prev_month, day=1)
-        
-                    if this_month in df_lstm_input.index and prev_month_dt in df_lstm_input.index:
-                        val_this = df_lstm_input.loc[this_month, 'Influx']
-                        val_prev = df_lstm_input.loc[prev_month_dt, 'Influx']
+                    if hist_curr_month in df_lstm_input.index and hist_prev_month in df_lstm_input.index:
+                        val_curr = df_lstm_input.loc[hist_curr_month, 'Influx']
+                        val_prev = df_lstm_input.loc[hist_prev_month, 'Influx']
                         if val_prev != 0:
-                            past_changes.append((val_this - val_prev) / val_prev)
+                            past_changes.append((val_curr - val_prev) / val_prev)
         
+                # Apply average MoM change
                 if past_changes:
                     avg_change = np.mean(past_changes)
+                    adjusted = prev_adjusted * (1 + avg_change)
+                else:
+                    avg_change = 0
+                    adjusted = current_forecast  # fallback
         
-                    # Use adjusted value of previous month (if available), otherwise original forecast
-                    prev_adjusted_month = pd.Timestamp(forecast_month.year, month - 1, 1)
-                    prev_val = adjusted_values.get(prev_adjusted_month, 
-                                                   forecast_df_monthly.loc[prev_adjusted_month, 'Forecasted Influx'])
-                    adjusted = prev_val * (1 + avg_change)
-        
-            adjusted_values[forecast_month] = adjusted
             adjusted_forecast.append(adjusted)
             avg_changes.append(avg_change)
+            adjusted_values[forecast_month] = adjusted
         
         forecast_df_monthly['Adjusted Forecast'] = adjusted_forecast
-        forecast_df_monthly['Avg MoM Change'] = [f"{c*100:.2f}%" for c in avg_changes]
+        forecast_df_monthly['Avg MoM Change'] = [f"{x * 100:.2f}%" for x in avg_changes]
+
 
 
 
