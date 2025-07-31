@@ -291,39 +291,50 @@ def run_monthly_forecast(uploaded_file):
         
         latest_year = df_lstm_input.index.max().year
         
+        # To store adjusted values by month for cascading use
+        adjusted_values = {}
+        
         for forecast_month in forecast_df_monthly.index:
             month = forecast_month.month
             current_forecast = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
         
-            # Default
             adjusted = current_forecast
             avg_change = 0
         
-            # Only adjust Nov and Dec based on previous month
-            if month in [11, 12]:  
+            if month in [10, 11, 12]:  # Oct, Nov, Dec
                 past_changes = []
         
-                for i in [1, 2, 3]:  # Look back 3 years
+                for i in [1, 2, 3]:  # last 3 years
                     year = forecast_month.year - i
-                    this_month = pd.Timestamp(year=year, month=month, day=1)
-                    prev_month = pd.Timestamp(year=year, month=month - 1, day=1)
+                    prev_month = month - 1
+                    if prev_month == 0:
+                        continue  # Skip if January (no Dec in previous year)
         
-                    if this_month in df_lstm_input.index and prev_month in df_lstm_input.index:
+                    this_month = pd.Timestamp(year=year, month=month, day=1)
+                    prev_month_dt = pd.Timestamp(year=year, month=prev_month, day=1)
+        
+                    if this_month in df_lstm_input.index and prev_month_dt in df_lstm_input.index:
                         val_this = df_lstm_input.loc[this_month, 'Influx']
-                        val_prev = df_lstm_input.loc[prev_month, 'Influx']
+                        val_prev = df_lstm_input.loc[prev_month_dt, 'Influx']
                         if val_prev != 0:
                             past_changes.append((val_this - val_prev) / val_prev)
         
                 if past_changes:
                     avg_change = np.mean(past_changes)
-                    prev_forecast = forecast_df_monthly.loc[pd.Timestamp(forecast_month.year, month - 1, 1), 'Forecasted Influx']
-                    adjusted = prev_forecast * (1 + avg_change)
         
+                    # Use adjusted value of previous month (if available), otherwise original forecast
+                    prev_adjusted_month = pd.Timestamp(forecast_month.year, month - 1, 1)
+                    prev_val = adjusted_values.get(prev_adjusted_month, 
+                                                   forecast_df_monthly.loc[prev_adjusted_month, 'Forecasted Influx'])
+                    adjusted = prev_val * (1 + avg_change)
+        
+            adjusted_values[forecast_month] = adjusted
             adjusted_forecast.append(adjusted)
             avg_changes.append(avg_change)
         
         forecast_df_monthly['Adjusted Forecast'] = adjusted_forecast
         forecast_df_monthly['Avg MoM Change'] = [f"{c*100:.2f}%" for c in avg_changes]
+
 
 
 
