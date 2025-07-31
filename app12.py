@@ -274,7 +274,7 @@ def run_monthly_forecast(uploaded_file):
         forecast_df_monthly = pd.DataFrame({'Forecasted Influx': pred}, index=future_dates)
         
         # === STEP 7: Adjust forecast using historical trends (keep same column name) ===
-        
+                
         adjusted_forecast = []
         avg_changes = []
         
@@ -284,7 +284,7 @@ def run_monthly_forecast(uploaded_file):
         for forecast_month in forecast_df_monthly.index:
             month = forecast_month.month
         
-            if month not in [7,8,9,10, 11, 12]:  # Oct–Dec adjustments only
+            if month not in [10, 11, 12]:  # Oct–Dec only
                 adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
                 avg_change = 0
             else:
@@ -294,35 +294,37 @@ def run_monthly_forecast(uploaded_file):
                 for i in historical_years:
                     past_year = latest_year - i
                     past_date = pd.Timestamp(year=past_year, month=month, day=1)
+        
                     if past_date in df_lstm_input.index:
                         past_values.append(df_lstm_input.loc[past_date, 'Influx'])
         
-                # Compute average historical % change
+                # Calculate avg % change if we have 2+ values
                 if len(past_values) >= 2:
                     diffs = []
                     for prev, curr in zip(past_values[1:], past_values[:-1]):
                         if prev != 0:
                             diffs.append((curr - prev) / prev)
-                    avg_change = np.mean(diffs) if diffs else 0
         
+                    avg_change = np.mean(diffs) if diffs else 0
+                    print(f"Avg % change for {forecast_month.strftime('%Y-%m')}: {avg_change:.2%}")
+        
+                    # Compare current forecast vs last year’s influx
                     ref_date = pd.Timestamp(year=latest_year - 1, month=month, day=1)
                     if ref_date in df_lstm_input.index:
-                        last_year_value = df_lstm_input.loc[ref_date, 'Influx']
+                        last_year_influx = df_lstm_input.loc[ref_date, 'Influx']
                         current_forecast = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
         
-                        # Compare current forecast vs. last year's value
-                        if last_year_value != 0:
-                            current_change = (current_forecast - last_year_value) / last_year_value
+                        # Actual forecasted % change
+                        if last_year_influx != 0:
+                            actual_change = (current_forecast - last_year_influx) / last_year_influx
                         else:
-                            current_change = 0
+                            actual_change = 0
         
-                        # If current change is below historical avg, apply the delta
-                        if current_change < avg_change:
-                            delta = avg_change - current_change
-                            adjusted = current_forecast * (1 + delta)
-                            print(f"Boosting {forecast_month.strftime('%Y-%m')} by additional {delta:.2%}")
-                        else:
-                            adjusted = current_forecast
+                        # Difference between desired and actual change
+                        gap = avg_change - actual_change
+        
+                        # Adjust forecast further to meet full historical trend
+                        adjusted = current_forecast * (1 + gap)
                     else:
                         adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
                 else:
@@ -332,9 +334,10 @@ def run_monthly_forecast(uploaded_file):
             adjusted_forecast.append(adjusted)
             avg_changes.append(avg_change)
         
-        # Update forecast_df_monthly
+        # Store back
         forecast_df_monthly['Adjusted Forecast'] = adjusted_forecast
         forecast_df_monthly['YOY % Change'] = [f"{c*100:.2f}%" for c in avg_changes]
+
 
 
 
