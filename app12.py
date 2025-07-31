@@ -217,8 +217,8 @@ def run_monthly_forecast(uploaded_file):
                 y_seqs.append(y[i+input_len:i+input_len+forecast_len].flatten())
             return np.array(X_seqs), np.array(y_seqs)
 
-        input_seq_len = 6
-        forecast_horizon = 6
+        input_seq_len = 9
+        forecast_horizon = 9
         X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
 
         split_idx = int(len(X_seq) * 0.8)
