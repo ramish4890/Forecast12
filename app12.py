@@ -275,7 +275,32 @@ def run_monthly_forecast(uploaded_file):
         
         # === STEP 7: Adjust forecast using historical trends (keep same column name) ===
 
-
+        adjusted_forecast = []
+        
+        for forecast_month in forecast_df_monthly.index:
+            month = forecast_month.month
+        
+            # Collect same-month influx for last 2–3 years
+            historical_years = [1, 2, 3]
+            past_values = []
+            
+            for i in historical_years:
+                past_date = forecast_month - pd.DateOffset(years=i)
+                if past_date in df_lstm_input.index:
+                    past_values.append(df_lstm_input.loc[past_date, 'Influx'])
+        
+            # Compute average % change over the years
+            if len(past_values) >= 2:
+                diffs = [((curr - prev) / prev) for prev, curr in zip(past_values[1:], past_values[:-1]) if prev != 0]
+                avg_change = np.mean(diffs) if diffs else 0
+                adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx'] * (1 + avg_change)
+            else:
+                adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']  # No adjustment
+        
+            adjusted_forecast.append(adjusted)
+        
+        # Overwrite the original forecast column with adjusted values (same name)
+        forecast_df_monthly['Forecasted Influx'] = adjusted_forecast
 
 
 
