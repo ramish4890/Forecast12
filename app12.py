@@ -284,7 +284,7 @@ def run_monthly_forecast(uploaded_file):
         for forecast_month in forecast_df_monthly.index:
             month = forecast_month.month
         
-            if month not in [10, 11, 12]:  # Oct–Dec only
+            if month not in [4,5,6,7,8,9,10, 11, 12]:  # Oct–Dec only
                 adjusted = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
                 avg_change = 0
             else:
