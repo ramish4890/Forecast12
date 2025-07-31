@@ -237,7 +237,7 @@ def run_monthly_forecast(uploaded_file):
         def build_and_compile_model(input_shape, output_dim):
             from tensorflow.keras import regularizers
 
-                LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape,
+            LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape,
                      kernel_regularizer=regularizers.l2(0.01)),
             model = Sequential([
                 LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape),
