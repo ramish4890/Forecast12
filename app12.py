@@ -294,46 +294,45 @@ def run_monthly_forecast(uploaded_file):
         for forecast_month in forecast_df_monthly.index:
             month = forecast_month.month
             current_forecast = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
-            avg_change = 0
-            adjusted = current_forecast
         
-            if month in [10, 11, 12]:  # Only Oct–Dec
-                # Get past 3 years' same month values
+            # Default values
+            adjusted = current_forecast
+            avg_change = 0
+        
+            if month in [10, 11, 12]:  # Q4 only
                 past_values = []
+        
+                # Collect past influx values for the same month over last 3 years
                 for i in [1, 2, 3]:
-                    past_year = latest_year - i
-                    past_date = pd.Timestamp(year=past_year, month=month, day=1)
+                    past_date = pd.Timestamp(year=latest_year - i, month=month, day=1)
                     if past_date in df_lstm_input.index:
                         past_values.append(df_lstm_input.loc[past_date, 'Influx'])
         
+                # Calculate average YoY % change
                 if len(past_values) >= 2:
-                    # Compute YoY % changes
                     diffs = [(curr - prev) / prev for prev, curr in zip(past_values[1:], past_values[:-1]) if prev != 0]
                     avg_change = np.mean(diffs) if diffs else 0
         
-                    # Actual change vs last year
-                    ref_date = pd.Timestamp(year=latest_year - 1, month=month, day=1)
-                    if ref_date in df_lstm_input.index:
-                        last_year_influx = df_lstm_input.loc[ref_date, 'Influx']
-                        actual_change = (current_forecast - last_year_influx) / last_year_influx if last_year_influx != 0 else 0
-        
-                        if month == 11:
-                            oct_date = pd.Timestamp(year=forecast_month.year, month=10, day=1)
-                            if oct_date in forecast_df_monthly.index:
-                                base = forecast_df_monthly.loc[oct_date, 'Forecasted Influx']
-                                adjusted = base * (1 + avg_change)
-                        elif month == 12:
-                            if len(adjusted_forecast) >= 2:
-                                nov_adjusted = adjusted_forecast[-1]
-                                adjusted = nov_adjusted * (1 + avg_change)
-                        else:
-                            adjusted = current_forecast * (1 + avg_change)
+                # Apply adjustment if change is significant
+                if abs(avg_change) > 0.05:
+                    if month == 10:
+                        # Adjust October directly from its current forecast
+                        adjusted = current_forecast * (1 + avg_change)
+                    elif month == 11:
+                        # Adjust November from adjusted October
+                        adjusted_oct = adjusted_forecast[-1] if adjusted_forecast else current_forecast
+                        adjusted = adjusted_oct * (1 + avg_change)
+                    elif month == 12:
+                        # Adjust December from adjusted November
+                        adjusted_nov = adjusted_forecast[-1] if adjusted_forecast else current_forecast
+                        adjusted = adjusted_nov * (1 + avg_change)
         
             adjusted_forecast.append(adjusted)
             avg_changes.append(avg_change)
         
         forecast_df_monthly['Adjusted Forecast'] = adjusted_forecast
         forecast_df_monthly['YOY % Change'] = [f"{c*100:.2f}%" for c in avg_changes]
+
 
 
 
