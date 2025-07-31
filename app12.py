@@ -182,67 +182,109 @@ def run_monthly_forecast(uploaded_file):
     st.info("Starting Monthly Forecast generation...")
 
     try:
+        # Expected sheets: 'monthly forecast', 'daily', 'hourly'
 
+        # === STEP 1: Load data for LSTM training ===
+        df_lstm_input = pd.read_excel(uploaded_file, sheet_name='monthly forecast')
+        df_lstm_input.columns = ['Month', 'Influx', 'AHT']
+        df_lstm_input['Month'] = pd.to_datetime(df_lstm_input['Month'], errors='coerce')
+        df_lstm_input.dropna(subset=['Month'], inplace=True)
+        df_lstm_input.set_index('Month', inplace=True)
+        df_lstm_input = df_lstm_input.asfreq('MS')
+
+        # === STEP 2: Feature Engineering ===
+        df_lstm_input['Influx_lag1'] = df_lstm_input['Influx'].shift(1)
+        df_lstm_input['Influx_lag2'] = df_lstm_input['Influx'].shift(2)
+        df_lstm_input['Rolling_Mean_3'] = df_lstm_input['Influx'].rolling(window=3).mean()
+        df_lstm_input['Month_Num'] = df_lstm_input.index.month
+        df_lstm_input['Sin_Month'] = np.sin(2 * np.pi * df_lstm_input['Month_Num'] / 12)
+        df_lstm_input['Cos_Month'] = np.cos(2 * np.pi * df_lstm_input['Month_Num'] / 12)
+        df_lstm_input['Quarter'] = df_lstm_input.index.quarter
+        df_lstm_input['Sin_Quarter'] = np.sin(2 * np.pi * df_lstm_input['Quarter'] / 4)
+        df_lstm_input['Cos_Quarter'] = np.cos(2 * np.pi * df_lstm_input['Quarter'] / 4)
+        df_lstm_input['Time_Index'] = np.arange(len(df_lstm_input))
+        df_lstm_input['Influx_CumAvg'] = df_lstm_input['Influx'].expanding().mean()
+        df_lstm_input.dropna(inplace=True)
+
+        features = ['Influx_lag1', 'Influx_lag2', 'Rolling_Mean_3', 'AHT',
+                    'Sin_Month', 'Cos_Month', 'Sin_Quarter', 'Cos_Quarter',
+                    'Time_Index', 'Influx_CumAvg']
+        target = 'Influx'
+
+        # === STEP 3: Scaling and Sequence Creation ===
+        scaler_X = MinMaxScaler()
+        scaler_y = MinMaxScaler()
+        X_all = scaler_X.fit_transform(df_lstm_input[features])
+        y_all = scaler_y.fit_transform(df_lstm_input[[target]])
+
+        def create_sequences(X, y, input_len, forecast_len):
+            X_seqs, y_seqs = [], []
+            for i in range(len(X) - input_len - forecast_len + 1):
+                X_seqs.append(X[i:i+input_len])
+                y_seqs.append(y[i+input_len:i+input_len+forecast_len].flatten())
+            return np.array(X_seqs), np.array(y_seqs)
+
+        input_seq_len = 9
+        forecast_horizon = 9
+        X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
+
+        split_idx = int(len(X_seq) * 0.8)
+        X_train, X_test = X_seq[:split_idx], X_seq[split_idx:]
+        y_train, y_test = y_seq[:split_idx], y_seq[split_idx:]
+
+        # === STEP 4: Model ===
+        @st.cache_resource
+        def build_and_compile_model(input_shape, output_dim):
+            from tensorflow.keras import regularizers
+
+                LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape,
+                     kernel_regularizer=regularizers.l2(0.01)),
+            model = Sequential([
+                LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape),
+                Dropout(0.4),
+                LSTM(32, activation='relu'),
+                Dropout(0.4),
+                Dense(output_dim)
+            ])
+            model.compile(optimizer='adam', loss='mse')
+            return model
+
+        model = build_and_compile_model((X_train.shape[1], X_train.shape[2]), forecast_horizon)
+        early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+
+        st.info("Training LSTM model...")
+        history = model.fit(X_train, y_train, validation_data=(X_test, y_test),
+                            epochs=100, batch_size=4, callbacks=[early_stop], verbose=0)
+        st.success("Model training complete!")
+
+        # Generate plot for loss
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.plot(history.history['loss'], label='Training Loss', linewidth=2)
+        ax.plot(history.history['val_loss'], label='Validation Loss', linewidth=2)
+        ax.set_title('Model Loss Over Epochs')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Mean Squared Error')
+        ax.legend()
+        ax.grid(True)
+        plt.tight_layout()
+        st.pyplot(fig)
+
+        # === STEP 6: Forecast monthly ===
+        last_input_seq = X_all[-input_seq_len:].reshape((1, input_seq_len, len(features)))
+        pred_scaled = model.predict(last_input_seq)
+        pred = scaler_y.inverse_transform(pred_scaled).flatten()
+        future_dates = pd.date_range(start=df_lstm_input.index[-1] + pd.DateOffset(months=1), periods=forecast_horizon, freq='MS')
+        forecast_df_monthly = pd.DataFrame({'Forecasted Influx': pred}, index=future_dates)
+        # === STEP 6: Forecast monthly ===
+        last_input_seq = X_all[-input_seq_len:].reshape((1, input_seq_len, len(features)))
+        pred_scaled = model.predict(last_input_seq)
+        pred = scaler_y.inverse_transform(pred_scaled).flatten()
+        future_dates = pd.date_range(start=df_lstm_input.index[-1] + pd.DateOffset(months=1), periods=forecast_horizon, freq='MS')
         
-        # Example data (replace with your real data)
-        # df = pd.read_csv('your_data.csv')
-        # Assuming you already have your X, y ready
+        # Create initial forecast DataFrame
+        forecast_df_monthly = pd.DataFrame({'Forecasted Influx': pred}, index=future_dates)
         
-        # Normalize if needed
-        scaler = MinMaxScaler()
-        X_scaled = scaler.fit_transform(X)
-        X_scaled = X_scaled.reshape((X_scaled.shape[0], X_scaled.shape[1], 1))
-        
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42, shuffle=False
-        )
-        
-        # Model Architecture
-        input_shape = (X_train.shape[1], X_train.shape[2])
-        output_dim = y_train.shape[1] if len(y_train.shape) > 1 else 1
-        
-        model = Sequential([
-            LSTM(32, activation='relu', return_sequences=True, input_shape=input_shape,
-                 kernel_regularizer=regularizers.l2(0.01)),
-            Dropout(0.3),
-            LSTM(16, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
-            Dropout(0.3),
-            Dense(output_dim)
-        ])
-        
-        # Compile
-        model.compile(optimizer='adam', loss='mse')
-        
-        # Callbacks
-        early_stop = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
-        lr_schedule = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=3, verbose=1)
-        
-        # Train
-        history = model.fit(
-            X_train, y_train,
-            validation_data=(X_test, y_test),
-            epochs=100,
-            batch_size=4,
-            callbacks=[early_stop, lr_schedule],
-            verbose=1
-        )
-        
-        # Plot training history
-        plt.figure(figsize=(10, 6))
-        plt.plot(history.history['loss'], label='Training Loss')
-        plt.plot(history.history['val_loss'], label='Validation Loss')
-        plt.title("Training vs Validation Loss")
-        plt.xlabel("Epochs")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-        
-        # Evaluate
-        test_loss = model.evaluate(X_test, y_test, verbose=0)
-        print(f"Test Loss: {test_loss:.4f}")
-# === STEP 7: Adjust forecast using historical trends (keep same column name) ===
+        # === STEP 7: Adjust forecast using historical trends (keep same column name) ===
                 
         adjusted_forecast = []
         avg_changes = []
