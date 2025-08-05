@@ -336,7 +336,7 @@ def run_monthly_forecast(uploaded_file):
                 # Apply average MoM change
                 if past_changes:
                     avg_change = np.mean(past_changes)
-                    adjusted = prev_adjusted * (1 + avg_change)
+                    adjusted = prev_adjusted * ( avg_change) +prev_adjusted
                 else:
                     avg_change = 0
                     adjusted = current_forecast  # fallback
