@@ -177,6 +177,7 @@ def run_revised_forecast(uploaded_file):
         return None, None, None, None, None
 
 # --- Function for Monthly Forecast (New LSTM-based code) ---
+'''
 def run_monthly_forecast(uploaded_file):
     st.header("Monthly Forecast (LSTM-based)")
     st.info("Starting Monthly Forecast generation...")
@@ -514,6 +515,339 @@ def run_monthly_forecast(uploaded_file):
         st.error(f"Error in Monthly Forecast: Please ensure the uploaded file contains 'monthly forecast', 'daily', and 'hourly' sheets with correct data structure. Error: {e}")
         st.exception(e)
         return None, None, None, None, None
+
+'''
+
+
+
+
+
+
+def run_monthly_forecast(uploaded_file):
+    st.header("Monthly Forecast (LSTM-based)")
+    st.info("Starting Monthly Forecast generation...")
+
+    try:
+        # Expected sheets: 'monthly forecast', 'daily', 'hourly'
+
+        # === STEP 1: Load data for LSTM training ===
+        df_lstm_input = pd.read_excel(uploaded_file, sheet_name='monthly forecast')
+        df_lstm_input.columns = ['Month', 'Influx', 'AHT']
+        df_lstm_input['Month'] = pd.to_datetime(df_lstm_input['Month'], errors='coerce')
+        df_lstm_input.dropna(subset=['Month'], inplace=True)
+        df_lstm_input.set_index('Month', inplace=True)
+        df_lstm_input = df_lstm_input.asfreq('MS')
+
+        # === STEP 2: Feature Engineering ===
+        df_lstm_input['Influx_lag1'] = df_lstm_input['Influx'].shift(1)
+        df_lstm_input['Influx_lag2'] = df_lstm_input['Influx'].shift(2)
+        df_lstm_input['Rolling_Mean_3'] = df_lstm_input['Influx'].rolling(window=3).mean()
+        df_lstm_input['Month_Num'] = df_lstm_input.index.month
+        df_lstm_input['Sin_Month'] = np.sin(2 * np.pi * df_lstm_input['Month_Num'] / 12)
+        df_lstm_input['Cos_Month'] = np.cos(2 * np.pi * df_lstm_input['Month_Num'] / 12)
+        df_lstm_input['Quarter'] = df_lstm_input.index.quarter
+        df_lstm_input['Sin_Quarter'] = np.sin(2 * np.pi * df_lstm_input['Quarter'] / 4)
+        df_lstm_input['Cos_Quarter'] = np.cos(2 * np.pi * df_lstm_input['Quarter'] / 4)
+        df_lstm_input['Time_Index'] = np.arange(len(df_lstm_input))
+        df_lstm_input['Influx_CumAvg'] = df_lstm_input['Influx'].expanding().mean()
+        df_lstm_input.dropna(inplace=True)
+
+        features = ['Influx_lag1', 'Influx_lag2', 'Rolling_Mean_3', 'AHT',
+                    'Sin_Month', 'Cos_Month', 'Sin_Quarter', 'Cos_Quarter',
+                    'Time_Index', 'Influx_CumAvg']
+        target = 'Influx'
+
+        # === STEP 3: Scaling and Sequence Creation ===
+        scaler_X = MinMaxScaler()
+        scaler_y = MinMaxScaler()
+        X_all = scaler_X.fit_transform(df_lstm_input[features])
+        y_all = scaler_y.fit_transform(df_lstm_input[[target]])
+
+        def create_sequences(X, y, input_len, forecast_len):
+            X_seqs, y_seqs = [], []
+            for i in range(len(X) - input_len - forecast_len + 1):
+                X_seqs.append(X[i:i+input_len])
+                y_seqs.append(y[i+input_len:i+input_len+forecast_len].flatten())
+            return np.array(X_seqs), np.array(y_seqs)
+
+        input_seq_len = 9
+        forecast_horizon = 9
+        X_seq, y_seq = create_sequences(X_all, y_all, input_seq_len, forecast_horizon)
+
+        split_idx = int(len(X_seq) * 0.8)
+        X_train, X_test = X_seq[:split_idx], X_seq[split_idx:]
+        y_train, y_test = y_seq[:split_idx], y_seq[split_idx:]
+
+        # === STEP 4: Model ===
+        @st.cache_resource
+        def build_and_compile_model(input_shape, output_dim):
+            from tensorflow.keras.layers import SimpleRNN
+
+            model = Sequential([
+                SimpleRNN(64, activation='relu', return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+                Dropout(0.2),
+                SimpleRNN(32, activation='relu'),
+                Dropout(0.2),
+                Dense(forecast_horizon)
+            ])
+            
+            model.compile(optimizer='adam', loss='mse')
+            return model
+
+        model = build_and_compile_model((X_train.shape[1], X_train.shape[2]), forecast_horizon)
+        early_stop = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
+
+        st.info("Training model...")
+        history = model.fit(X_train, y_train, validation_data=(X_test, y_test),
+                            epochs=100, batch_size=4, callbacks=[early_stop], verbose=0)
+        st.success("Model training complete!")
+        
+        # --- NEW CODE FOR ACCURACY VISUALIZATION ---
+        st.write("---")
+        st.subheader("Model Performance Evaluation")
+        
+        # Plotting the loss
+        fig_loss, ax_loss = plt.subplots(figsize=(10, 5))
+        ax_loss.plot(history.history['loss'], label='Training Loss', linewidth=2)
+        ax_loss.plot(history.history['val_loss'], label='Validation Loss', linewidth=2)
+        ax_loss.set_title('Model Loss Over Epochs', fontsize=16)
+        ax_loss.set_xlabel('Epoch', fontsize=12)
+        ax_loss.set_ylabel('Mean Squared Error', fontsize=12)
+        ax_loss.legend()
+        ax_loss.grid(True)
+        plt.tight_layout()
+        st.pyplot(fig_loss)
+
+        # Get predictions for the last sequence of training and test sets
+        train_preds_scaled = model.predict(X_train)
+        test_preds_scaled = model.predict(X_test)
+        
+        # Inverse transform the scaled predictions and actual values
+        train_preds = scaler_y.inverse_transform(train_preds_scaled)
+        test_preds = scaler_y.inverse_transform(test_preds_scaled)
+        y_train_actual = scaler_y.inverse_transform(y_train)
+        y_test_actual = scaler_y.inverse_transform(y_test)
+        
+        # Calculate and display metrics
+        train_mse = np.mean((train_preds - y_train_actual)**2)
+        test_mse = np.mean((test_preds - y_test_actual)**2)
+        train_mae = np.mean(np.abs(train_preds - y_train_actual))
+        test_mae = np.mean(np.abs(test_preds - y_test_actual))
+
+        st.markdown(f"**Training MAE:** `{train_mae:.2f}`")
+        st.markdown(f"**Testing MAE:** `{test_mae:.2f}`")
+        st.markdown(f"**Training MSE:** `{train_mse:.2f}`")
+        st.markdown(f"**Testing MSE:** `{test_mse:.2f}`")
+
+        # Plotting Actual vs. Predicted on Test Data
+        st.markdown("### Actual vs. Predicted (Test Set)")
+        fig_test, ax_test = plt.subplots(figsize=(12, 6))
+        # Flatten the arrays to plot them easily
+        ax_test.plot(y_test_actual.flatten(), label='Actual Influx', marker='o', linestyle='-', color='b')
+        ax_test.plot(test_preds.flatten(), label='Predicted Influx', marker='x', linestyle='--', color='r')
+        ax_test.set_title('Actual vs. Predicted Influx on Test Data', fontsize=16)
+        ax_test.set_xlabel('Data Point Index (in Test Set)', fontsize=12)
+        ax_test.set_ylabel('Influx', fontsize=12)
+        ax_test.legend()
+        ax_test.grid(True)
+        plt.tight_layout()
+        st.pyplot(fig_test)
+        
+        # Plotting Actual vs. Predicted on Training Data
+        st.markdown("### Actual vs. Predicted (Training Set)")
+        fig_train, ax_train = plt.subplots(figsize=(12, 6))
+        ax_train.plot(y_train_actual.flatten(), label='Actual Influx', marker='o', linestyle='-', color='g')
+        ax_train.plot(train_preds.flatten(), label='Predicted Influx', marker='x', linestyle='--', color='r')
+        ax_train.set_title('Actual vs. Predicted Influx on Training Data', fontsize=16)
+        ax_train.set_xlabel('Data Point Index (in Training Set)', fontsize=12)
+        ax_train.set_ylabel('Influx', fontsize=12)
+        ax_train.legend()
+        ax_train.grid(True)
+        plt.tight_layout()
+        st.pyplot(fig_train)
+
+        # --- END OF NEW CODE ---
+
+        # === STEP 6: Forecast monthly ===
+        # ... (rest of the monthly forecast logic remains the same)
+        last_input_seq = X_all[-input_seq_len:].reshape((1, input_seq_len, len(features)))
+        pred_scaled = model.predict(last_input_seq)
+        pred = scaler_y.inverse_transform(pred_scaled).flatten()
+        future_dates = pd.date_range(start=df_lstm_input.index[-1] + pd.DateOffset(months=1), periods=forecast_horizon, freq='MS')
+        
+        # Create initial forecast DataFrame
+        forecast_df_monthly = pd.DataFrame({'Forecasted Influx': pred}, index=future_dates)
+        
+        # === STEP 7: Adjust forecast using historical trends (keep same column name) ===
+        adjusted_forecast = []
+        avg_changes = []
+        adjusted_values = {}
+        
+        # Sort forecast to ensure order
+        forecast_df_monthly = forecast_df_monthly.sort_index()
+        
+        # Loop through forecast months
+        for i, forecast_month in enumerate(forecast_df_monthly.index):
+            month = forecast_month.month
+            year = forecast_month.year
+            current_forecast = forecast_df_monthly.loc[forecast_month, 'Forecasted Influx']
+            
+            if i == 0:
+                # No previous month to compare — use original forecast
+                adjusted = current_forecast
+                avg_change = 0
+            else:
+                # Get previous month
+                prev_month_dt = forecast_df_monthly.index[i - 1]
+                prev_month = prev_month_dt.month
+                prev_adjusted = adjusted_values[prev_month_dt]
+                
+                # Collect historical MoM % changes
+                past_changes = []
+                for j in [1, 2, 3]:  # Last 3 years
+                    hist_year = year - j
+                    hist_curr_month = pd.Timestamp(year=hist_year, month=month, day=1)
+                    hist_prev_month = pd.Timestamp(year=hist_year, month=prev_month, day=1)
+                
+                    if hist_curr_month in df_lstm_input.index and hist_prev_month in df_lstm_input.index:
+                        val_curr = df_lstm_input.loc[hist_curr_month, 'Influx']
+                        val_prev = df_lstm_input.loc[hist_prev_month, 'Influx']
+                        if val_prev != 0:
+                            past_changes.append((val_curr - val_prev) / val_prev)
+                
+                # Apply average MoM change
+                if past_changes:
+                    avg_change = np.mean(past_changes)
+                    adjusted = prev_adjusted * (1+ avg_change)
+                else:
+                    avg_change = 0
+                    adjusted = current_forecast  # fallback
+            
+            adjusted_forecast.append(adjusted)
+            avg_changes.append(avg_change)
+            adjusted_values[forecast_month] = adjusted
+        
+        forecast_df_monthly['Adjusted Forecast'] = adjusted_forecast
+        forecast_df_monthly['Avg MoM Change'] = [f"{x * 100:.2f}%" for x in avg_changes]
+        
+        st.info("Monthly influx forecast generated.")
+
+        # === STEP 7: Daily Pod Forecast ===
+        # Use the 'daily' sheet from the same uploaded file
+        daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily")
+        daily_df_monthly_input['Date'] = pd.to_datetime(daily_df_monthly_input['Date'])
+        daily_df_monthly_input['Weekday'] = daily_df_monthly_input['Date'].dt.weekday
+        min_days = daily_df_monthly_input['Weekday'].value_counts().min()
+        balanced = daily_df_monthly_input.groupby('Weekday').apply(lambda x: x.sample(min_days, random_state=42)).reset_index(drop=True)
+        
+        pod_total = balanced.groupby('Pod')['Influx'].sum()
+        pod_prop = pod_total / pod_total.sum()
+        
+        monthly_pod_forecast = pd.DataFrame(index=future_dates)
+        for pod in pod_prop.index:
+            # --- THIS IS THE MODIFIED LINE ---
+            monthly_pod_forecast[pod] = forecast_df_monthly['Adjusted Forecast'] * pod_prop[pod]
+        
+        weekday_total = balanced.groupby(['Pod', 'Weekday'])['Influx'].sum()
+        weekday_prop = weekday_total.groupby(level=0).apply(lambda x: x / x.sum())
+        
+        daily_forecast_all = []
+        for month_start in future_dates:
+            month_end = month_start + pd.offsets.MonthEnd(0)
+            days = pd.date_range(start=month_start, end=month_end, freq='D')
+            weekdays_in_month = [d.weekday() for d in days]
+            month_data = {'Date': days}
+            for pod in pod_prop.index:
+                pod_month_total = monthly_pod_forecast.loc[month_start, pod]
+                pod_week_props = weekday_prop.loc[pod]
+                pod_daily = []
+
+                sum_of_relevant_weekday_props = sum(pod_week_props.get(idx, 0) for idx in weekdays_in_month)
+                weekday_counts_in_month = pd.Series(weekdays_in_month).value_counts()
+
+                for day in days:
+                    weekday_idx = day.weekday()
+                    weekday_prop_val = pod_week_props.get(weekday_idx, 0)
+
+                    if sum_of_relevant_weekday_props > 0:
+                        daily_val = (pod_month_total * weekday_prop_val / sum_of_relevant_weekday_props) * weekday_counts_in_month.get(weekday_idx, 0)
+                    else:
+                        daily_val = 0
+                    pod_daily.append(daily_val)
+
+                month_data[pod] = pod_daily
+
+            daily_forecast_all.append(pd.DataFrame(month_data))
+
+        daily_forecast_df = pd.concat(daily_forecast_all, ignore_index=True)
+        daily_forecast_df.set_index('Date', inplace=True)
+        st.info("Daily pod forecast generated.")
+
+        # === STEP 8: Hourly Forecast ===
+        # Use the 'hourly' sheet from the same uploaded file
+        hourly_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="hourly")
+        hourly_df_monthly_input['Date'] = pd.to_datetime(hourly_df_monthly_input['Date'])
+        hourly_df_monthly_input['Weekday'] = hourly_df_monthly_input['Date'].dt.day_name()
+        grouped = hourly_df_monthly_input.groupby(['Pod', 'Weekday', 'Hour'])['Influx'].sum().reset_index()
+        totals = grouped.groupby(['Pod', 'Weekday'])['Influx'].sum().reset_index().rename(columns={'Influx': 'TotalInflux'})
+        merged = pd.merge(grouped, totals, on=['Pod', 'Weekday'])
+        merged['HourlyProportion'] = merged['Influx'] / merged['TotalInflux']
+
+        hourly_forecast_all = []
+        weekday_name_map = {
+            0: 'Monday', 1: 'Tuesday', 2: 'Wednesday', 3: 'Thursday',
+            4: 'Friday', 5: 'Saturday', 6: 'Sunday'
+        }
+        for date, row in daily_forecast_df.iterrows():
+            weekday_name = weekday_name_map[date.weekday()]
+            for pod in pod_prop.index:
+                if pod not in row:
+                    continue
+                daily_val = row[pod]
+                pod_hourly_props = merged[(merged['Pod'] == pod) & (merged['Weekday'] == weekday_name)]
+
+                if not pod_hourly_props.empty:
+                    sum_hr_prop = pod_hourly_props['HourlyProportion'].sum()
+                    if sum_hr_prop > 0:
+                        normalized_hourly_props = pod_hourly_props['HourlyProportion'] / sum_hr_prop
+                    else:
+                        normalized_hourly_props = pd.Series([0] * len(pod_hourly_props), index=pod_hourly_props.index)
+
+                    for idx, hr_row in pod_hourly_props.iterrows():
+                        hour = hr_row['Hour']
+                        hr_prop = normalized_hourly_props.loc[idx]
+                        hourly_forecast_all.append({
+                            'Date': date,
+                            'Hour': int(hour),
+                            'Pod': pod,
+                            'Forecasted Influx': (daily_val * hr_prop)
+                        })
+
+        hourly_forecast_df = pd.DataFrame(hourly_forecast_all).sort_values(by=['Date', 'Hour', 'Pod'])
+        st.success("Hourly pod forecast generated!")
+
+        return forecast_df_monthly, monthly_pod_forecast, daily_forecast_df, hourly_forecast_df, None # No pivot for monthly forecast
+
+    except Exception as e:
+        st.error(f"Error in Monthly Forecast: Please ensure the uploaded file contains 'monthly forecast', 'daily', and 'hourly' sheets with correct data structure. Error: {e}")
+        st.exception(e)
+        return None, None, None, None, None
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # --- Streamlit UI Layout ---
