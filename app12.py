@@ -239,12 +239,23 @@ def run_monthly_forecast(uploaded_file):
 
             LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape,
                      kernel_regularizer=regularizers.l2(0.01)),
+            '''
             model = Sequential([
                 LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape),
                 Dropout(0.4),
                 LSTM(32, activation='relu'),
                 Dropout(0.4),
                 Dense(output_dim)
+            ])
+            '''
+            from tensorflow.keras.layers import SimpleRNN
+
+            model = Sequential([
+                SimpleRNN(64, activation='relu', return_sequences=True, input_shape=(X_train.shape[1], X_train.shape[2])),
+                Dropout(0.2),
+                SimpleRNN(32, activation='relu'),
+                Dropout(0.2),
+                Dense(forecast_horizon)
             ])
             model.compile(optimizer='adam', loss='mse')
             return model
