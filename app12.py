@@ -392,6 +392,7 @@ def run_monthly_forecast(uploaded_file):
 
         # === STEP 7: Daily Pod Forecast ===
         # Use the 'daily' sheet from the same uploaded file
+        '''
         daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily")
         daily_df_monthly_input['Date'] = pd.to_datetime(daily_df_monthly_input['Date'])
         daily_df_monthly_input['Weekday'] = daily_df_monthly_input['Date'].dt.weekday
@@ -407,7 +408,31 @@ def run_monthly_forecast(uploaded_file):
 
         weekday_total = balanced.groupby(['Pod', 'Weekday'])['Influx'].sum()
         weekday_prop = weekday_total.groupby(level=0).apply(lambda x: x / x.sum())
+                '''
+        # === STEP 7: Daily Pod Forecast ===
+        # Use the 'daily' sheet from the same uploaded file
+        daily_df_monthly_input = pd.read_excel(uploaded_file, sheet_name="daily")
+        daily_df_monthly_input['Date'] = pd.to_datetime(daily_df_monthly_input['Date'])
+        daily_df_monthly_input['Weekday'] = daily_df_monthly_input['Date'].dt.weekday
+        min_days = daily_df_monthly_input['Weekday'].value_counts().min()
+        balanced = daily_df_monthly_input.groupby('Weekday').apply(lambda x: x.sample(min_days, random_state=42)).reset_index(drop=True)
+        
+        pod_total = balanced.groupby('Pod')['Influx'].sum()
+        pod_prop = pod_total / pod_total.sum()
+        
+        monthly_pod_forecast = pd.DataFrame(index=future_dates)
+        for pod in pod_prop.index:
+            # --- THIS IS THE MODIFIED LINE ---
+            monthly_pod_forecast[pod] = forecast_df_monthly['Adjusted Forecast'] * pod_prop[pod]
+        
+        weekday_total = balanced.groupby(['Pod', 'Weekday'])['Influx'].sum()
+        weekday_prop = weekday_total.groupby(level=0).apply(lambda x: x / x.sum())
+        
+        # The rest of the daily and hourly calculations will now use the adjusted values
+        # ... (the rest of your code remains the same)
 
+
+        
         daily_forecast_all = []
         for month_start in future_dates:
             month_end = month_start + pd.offsets.MonthEnd(0)
