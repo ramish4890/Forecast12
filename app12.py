@@ -239,7 +239,7 @@ def run_monthly_forecast(uploaded_file):
 
             LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape,
                      kernel_regularizer=regularizers.l2(0.01)),
-            
+            '''
             model = Sequential([
                 LSTM(64, activation='relu', return_sequences=True, input_shape=input_shape),
                 Dropout(0.4),
@@ -257,7 +257,7 @@ def run_monthly_forecast(uploaded_file):
                 Dropout(0.2),
                 Dense(forecast_horizon)
             ])
-            '''
+            
             model.compile(optimizer='adam', loss='mse')
             return model
 
